@@ -1,0 +1,94 @@
+library(bigsnpr)
+library(bigstatsr)
+library(data.table)
+library(bigreadr)
+
+# ===============================
+# Directories and cores
+# ===============================
+workdir <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/LD_matrices"
+sumstat_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_final_cleaned.gz"
+hapmap_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/map.rds"
+genetic_map_dir <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/genetic_maps"
+NCORES <- 8
+
+# ===============================
+# Load sumstats and HapMap3
+# ===============================
+cat("Loading sumstats...\n")
+sumstats <- fread2(sumstat_file)
+names(sumstats) <- c("chr","pos","rsid","a0","a1","beta","n_eff","beta_se","p","INFO","MAF")
+sumstats <- as.data.table(sumstats)
+
+cat("Loading HapMap map.rds...\n")
+hapmap <- readRDS(hapmap_file)
+
+cat("Filtering sumstats to HapMap3 SNPs...\n")
+sumstats <- sumstats[rsid %in% hapmap$rsid]
+cat("Total HapMap3 filtered SNPs:", nrow(sumstats), "\n")
+
+# Upper-case alleles
+sumstats[, a0 := toupper(a0)]
+sumstats[, a1 := toupper(a1)]
+
+# ===============================
+# Compute LD per chromosome
+# ===============================
+for(chr in 1:22){
+  cat("===== Chromosome", chr, "=====\n")
+  
+  # Attach per-chr bigSNP
+  rds_file <- sprintf("%s/chr%d_0.95.rds", workdir, chr)
+  obj <- snp_attach(rds_file)
+  G <- obj$genotypes
+  map <- obj$map[, c("chromosome","marker.ID","physical.pos","allele1","allele2")]
+  names(map) <- c("chr","rsid","pos","a0","a1")
+  
+  # Upper-case alleles in map
+  map$a0 <- toupper(map$a0)
+  map$a1 <- toupper(map$a1)
+  
+  # Subset sumstats to this chromosome
+  ss_chr <- sumstats[chr == !!chr]
+  cat("Sumstats SNPs for chr", chr, ":", nrow(ss_chr), "\n")
+  
+  # Match per-chromosome
+  info_snp <- snp_match(ss_chr, map)
+  cat("Matched SNPs:", nrow(info_snp), "\n")
+  
+  # -------------------------------
+  # Read genetic map TXT and interpolate positions
+  # -------------------------------
+  genetic_map_file <- file.path(genetic_map_dir, sprintf("genetic_map_GRCh37_chr%d.txt", chr))
+  if(!file.exists(genetic_map_file)){
+    stop("Genetic map file not found for chr", chr)
+  }
+  
+  # snp_asGeneticPos will automatically read the file
+  POS2 <- snp_asGeneticPos(map$chr, map$pos, dir = genetic_map_dir)
+  
+  # -------------------------------
+  # Compute LD
+  # -------------------------------
+  # Use the indices of matched SNPs in the bigSNP object
+  ind_chr <- info_snp$`_NUM_ID_`
+  
+  corr <- snp_cor(
+    G,
+    ind.col = ind_chr,
+    ncores = NCORES,
+    infos.pos = POS2[ind_chr],
+    size = 3/1000  # 3 Mb window
+  )
+  
+  # Save LD matrix
+  saveRDS(corr, sprintf("%s/LD_chr%02d.rds", workdir, chr))
+  
+  # Clean up
+  rm(obj, G, corr, info_snp, ss_chr, POS2)
+  gc()
+}
+
+cat("All per-chromosome LD matrices created.\n")
+
+}
