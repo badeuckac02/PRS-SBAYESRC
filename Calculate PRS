@@ -1,0 +1,35 @@
+cat << EOF > /working/lab_miguelr/badeU/AGDS_CP_GWAS/run_prs.R
+library(SBayesRC)
+
+# PBS array chromosome index
+CHR <- as.character(Sys.getenv("PBS_ARRAY_INDEX"))
+
+# Paths
+work_dir <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/SBayesRC"
+genoPrefix <- paste0("/reference/genepi/GWAS_release/Release11/Release11_HRCr1.1/bestguess/chr", CHR, "_thres0.95_cleaned")
+weight <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_sbrc.txt"
+outname <- paste0("toukimo_chr", CHR, ".prs")
+
+# Run PRS
+prs(weight = weight, genoPrefix = genoPrefix, out = work_dir, genoCHR = CHR, outname = outname)
+EOF
+
+
+PBS for Rscript
+
+cat << EOF > /working/lab_miguelr/badeU/AGDS_CP_GWAS/Toukimo_prs.pbs
+#!/bin/bash
+#PBS -N Toukimo_prs
+#PBS -l mem=30GB,walltime=10:00:00,ncpus=10
+#PBS -J 1-22
+#PBS -o /working/lab_miguelr/badeU/AGDS_CP_GWAS/SBayesRC/Toukimo_prs.o
+#PBS -e /working/lab_miguelr/badeU/AGDS_CP_GWAS/SBayesRC/Toukimo_prs.e
+
+module load plink/1.90b6.8
+module load R/4.3.1
+
+cd /working/lab_miguelr/badeU/AGDS_CP_GWAS
+
+# Run the R PRS script
+Rscript run_prs.R
+EOF
