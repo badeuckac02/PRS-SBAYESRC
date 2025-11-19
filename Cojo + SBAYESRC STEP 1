@@ -1,0 +1,68 @@
+step 1 #Convert to COJO 
+
+#!/usr/bin/env Rscript
+library(data.table)
+
+# Path to your sumstats
+sumstats_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo.gz"
+
+# Read the file
+sumstats <- fread(sumstats_file)
+
+# Select and rename COJO columns
+cojo <- sumstats[, .(SNP = MarkerName,
+                     A1 = Allele1,
+                     A2 = Allele2,
+                     freq = Freq1,
+                     b = BETA,
+                     se = SE,
+                     p = P)]
+
+# Add sample size (replace 15000 with actual N)
+cojo[, N := SAMPLE SIZE GOES HERE]
+
+# Optional: remove ambiguous SNPs (A/T or C/G)
+cojo <- cojo[!((A1=="A" & A2=="T") | (A1=="T" & A2=="A") |
+                (A1=="C" & A2=="G") | (A1=="G" & A2=="C"))]
+
+# Write COJO file
+fwrite(cojo, "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo.cojo",
+       sep="\t", quote=FALSE, na="NA")
+
+cat("COJO file created successfully!\n")
+
+STEP 2 TIDY 
+
+
+library(SBayesRC)
+
+tidy(
+  "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo.cojo",
+  "/working/lab_miguelr/badeU/AGDS_CP_GWAS/SbayesRC/UKB_Ref",
+  "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_tidy.ma"
+)
+
+STEP 3 IMPUTE 
+
+library(SBayesRC)
+
+# Direct paths
+tidy_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_tidy.ma"
+ld_folder <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/SbayesRC/UKB_Ref"
+imp_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_imp.ma"
+
+# Run imputation
+impute(tidy_file, ld_folder, imp_file)
+
+STEP 3 SBAYESRC 
+
+library(SBayesRC)
+
+# Paths
+imp_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_imp.ma"
+ld_folder <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/SbayesRC/UKB_Ref"
+out_prefix <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_sbrc"
+annot_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/SbayesRC/annot_baseline2.2.txt"
+
+# Run SBayesRC modeling
+sbayesrc(imp_file, ld_folder, out_prefix, annot = annot_file)
