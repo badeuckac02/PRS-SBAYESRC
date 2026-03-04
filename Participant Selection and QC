@@ -1,0 +1,149 @@
+library(haven)
+library(data.table)
+
+# ============================================================
+# AGDS PAINMAIN/PAINNOW phenotype + QC + DXMDD->MDD
+#
+# PAINMAIN coding (duration):
+# 1 <1 month         -> EXCLUDE
+# 2 1-3 months       -> EXCLUDE
+# 3-7 (>=3 months)   -> CASE
+# anything else/NA   -> CONTROL
+#
+# PAINNOW coding (raw 1..11):
+# 1 = No pain
+# 2..11 = pain 1..10
+#
+# QC:
+# - Drop PAINMAIN 1 or 2 (exclude_acute)
+# - CASES: PAINNOW must NOT be 1 (exclude if PAINNOW==1)
+# - CONTROLS: PAINNOW must be 1 or NA (allow 0 too); exclude if PAINNOW in 2..11
+# - DXMDD -> MDD: MDD=1 only if DXMDD==1 else 0
+#
+# Outputs:
+# - QC-passed dataset
+# - Excluded dataset with detailed reasons
+# ============================================================
+
+file <- "/Volumes/labdata/Lab_MiguelR/ITS/badeU/AGDSInfo/Combined_AGDS_2020_Freeze_20241003.sav"
+out_dir <- "/Volumes/labdata/Lab_MiguelR/ITS/badeU/AGDSInfo"
+
+# ----------------------------
+# 0) Read
+# ----------------------------
+d0 <- as.data.table(read_sav(file))
+
+# Keep required vars
+need <- c("STUDYID","PAINMAIN","PAINNOW","DXMDD")
+missing_vars <- setdiff(need, names(d0))
+if (length(missing_vars) > 0) stop("Missing columns in SAV: ", paste(missing_vars, collapse=", "))
+
+d <- d0[, .(ID = STUDYID, PAINMAIN, PAINNOW, DXMDD)]
+
+# Numeric conversion (handles labelled vars)
+d[, PAINMAIN := as.numeric(PAINMAIN)]
+d[, PAINNOW  := as.numeric(PAINNOW)]
+d[, DXMDD    := as.numeric(DXMDD)]
+
+# ----------------------------
+# 1) DXMDD -> MDD
+# ----------------------------
+# rule: DXMDD==1 => 1, else 0
+d[, MDD := fifelse(DXMDD == 1, 1L, 0L)]
+
+# ----------------------------
+# 2) Group from PAINMAIN
+# ----------------------------
+# exclude acute
+d[, exclude_acute := PAINMAIN %in% c(1,2)]
+
+# case if 3..7
+d[, is_case := PAINMAIN %in% 3:7]
+
+# control otherwise (NA/0/other codes)
+d[, is_control := !exclude_acute & !is_case]
+
+d[, group := fifelse(exclude_acute, "exclude_acute",
+              fifelse(is_case, "case", "control"))]
+
+# ----------------------------
+# 3) QC using PAINNOW (raw 1..11)
+# ----------------------------
+# CASES: if PAINNOW==1 exclude (no pain)
+d[, qc_case_bad_painnow := (group == "case") & (PAINNOW == 1)]
+
+# CONTROLS: must be 1/NA (allow 0 too); exclude if PAINNOW in 2..11
+d[, qc_control_bad_painnow := (group == "control") & (PAINNOW %in% 2:11)]
+
+# Optional sanity: flag PAINNOW outside expected (0/1..11/NA)
+d[, qc_painnow_invalid_code := !(is.na(PAINNOW) | PAINNOW %in% c(0,1:11))]
+
+# ----------------------------
+# 4) Combine exclusions + reasons
+# ----------------------------
+d[, excluded := FALSE]
+d[, reason := ""]
+
+add_reason <- function(idx, msg) {
+  d[idx, excluded := TRUE]
+  d[idx, reason := fifelse(reason == "", msg, paste(reason, msg, sep=" | "))]
+}
+
+add_reason(d$exclude_acute == TRUE, "Excluded: PAINMAIN in {1,2} (acute)")
+add_reason(d$qc_case_bad_painnow == TRUE, "Excluded: CASE but PAINNOW==1 (no pain)")
+add_reason(d$qc_control_bad_painnow == TRUE, "Excluded: CONTROL but PAINNOW indicates pain (2..11)")
+add_reason(d$qc_painnow_invalid_code == TRUE, "Flag: PAINNOW has invalid code (not NA/0/1..11)")
+
+# ----------------------------
+# 5) Outputs
+# ----------------------------
+excluded_dt <- d[excluded == TRUE, .(
+  ID, PAINMAIN, group, PAINNOW, DXMDD, MDD,
+  exclude_acute, qc_case_bad_painnow, qc_control_bad_painnow, qc_painnow_invalid_code,
+  reason
+)]
+
+final_dt <- d[excluded == FALSE, .(
+  ID, group,                # group is case/control only here
+  PAINMAIN, PAINNOW,
+  DXMDD, MDD
+)]
+
+# ----------------------------
+# 6) Reporting
+# ----------------------------
+cat("\n====================\nAGDS QC Summary\n====================\n")
+cat("Total participants:", nrow(d), "\n")
+cat("Excluded:", nrow(excluded_dt), "\n")
+cat("Final QC-passed:", nrow(final_dt), "\n\n")
+
+cat("Group counts (pre-QC):\n")
+print(table(d$group, useNA="ifany"))
+
+cat("\nGroup counts (final):\n")
+print(table(final_dt$group, useNA="ifany"))
+
+cat("\nMDD distribution (final):\n")
+print(table(final_dt$MDD, useNA="ifany"))
+
+cat("\nExclusion reasons (counts):\n")
+print(excluded_dt[, .N, by=reason][order(-N)])
+
+cat("\nQC flag counts (not mutually exclusive):\n")
+print(d[, .(
+  excluded_acute              = sum(exclude_acute, na.rm=TRUE),
+  case_painnow_eq1            = sum(qc_case_bad_painnow, na.rm=TRUE),
+  control_painnow_in_2_11     = sum(qc_control_bad_painnow, na.rm=TRUE),
+  painnow_invalid_code        = sum(qc_painnow_invalid_code, na.rm=TRUE)
+)])
+
+# ----------------------------
+# 7) Write files
+# ----------------------------
+out_final <- file.path(out_dir, "AGDS_PAINMAIN_PAINNOW_QCpassed.tsv")
+out_excl  <- file.path(out_dir, "AGDS_PAINMAIN_PAINNOW_exclusions.tsv")
+
+fwrite(final_dt, out_final, sep="\t")
+fwrite(excluded_dt, out_excl, sep="\t")
+
+cat("\nWrote:\n", out_final, "\n", out_excl, "\n", sep="")
