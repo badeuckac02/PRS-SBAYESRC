@@ -1,0 +1,85 @@
+#!/usr/bin/env Rscript
+
+# =========================================================
+# SBayesRC model fitting for PTSD GWAS summary statistics
+# =========================================================
+# Purpose:
+#   Run SBayesRC on imputed PTSD summary statistics to
+#   estimate posterior SNP effects for downstream PRS scoring.
+#
+# Inputs:
+#   1. Imputed summary statistics (.ma)
+#   2. SBayesRC LD reference folder
+#   3. Annotation file
+#
+# Output:
+#   - .txt posterior SNP effects
+#   - .par parameter estimates
+#   - .rds model object
+#
+# Author: Bade Uckac
+# =========================================================
+
+suppressPackageStartupMessages({
+  library(SBayesRC)
+  library(data.table)
+})
+
+# -----------------------------
+# File paths
+# -----------------------------
+imp_file <- "/working/lab_miguelr/badeU/04_PRS_AGDS_Painsite/PTSD/eur_ptsd_pcs_v4_aug3_2021_imp.ma"
+
+ld_folder <- "/working/lab_miguelr/badeU/04_PRS_AGDS_Painsite/UKB_Ref"
+
+out_prefix <- "/working/lab_miguelr/badeU/04_PRS_AGDS_Painsite/PTSD/eur_ptsd_pcs_v4_aug3_2021_sbrc"
+
+annot_file <- "/working/lab_miguelr/badeU/04_PRS_AGDS_Painsite/04_prs_models/SbayesRC_Ref/annot_baseline2.2.txt"
+
+# -----------------------------
+# Basic input checks
+# -----------------------------
+if (!file.exists(imp_file)) {
+  stop("Imputed summary statistics file not found: ", imp_file)
+}
+
+if (!dir.exists(ld_folder)) {
+  stop("LD reference folder not found: ", ld_folder)
+}
+
+if (!file.exists(annot_file)) {
+  stop("Annotation file not found: ", annot_file)
+}
+
+# -----------------------------
+# Print run information
+# -----------------------------
+cat("========================================\n")
+cat("Running SBayesRC model fitting\n")
+cat("========================================\n")
+cat("Input summary statistics: ", imp_file, "\n", sep = "")
+cat("LD reference folder:      ", ld_folder, "\n", sep = "")
+cat("Annotation file:          ", annot_file, "\n", sep = "")
+cat("Output prefix:            ", out_prefix, "\n", sep = "")
+cat("Start time:               ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n", sep = "")
+cat("========================================\n\n")
+
+# -----------------------------
+# Run SBayesRC
+# -----------------------------
+sbayesrc(
+  imp_file   = imp_file,
+  ld_folder  = ld_folder,
+  out_prefix = out_prefix,
+  annot      = annot_file
+)
+
+# -----------------------------
+# Completion message
+# -----------------------------
+cat("\n========================================\n")
+cat("SBayesRC completed successfully\n")
+cat("Finish time: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n", sep = "")
+cat("Outputs written with prefix:\n")
+cat(out_prefix, "\n")
+cat("========================================\n")
