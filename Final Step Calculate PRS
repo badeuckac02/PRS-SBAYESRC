@@ -1,0 +1,21 @@
+
+#Main Rscriot used to calculate PGS
+
+library(SBayesRC)
+
+work_dir <- "/working/lab_miguelr/badeU/04_PRS_AGDS_Painsite/PTSD"
+weight <- file.path(work_dir, "eur_ptsd_pcs_v4_aug3_2021_sbrc.txt")
+
+for (CHR in 1:22) {
+  genoPrefix <- paste0(
+    "/working/lab_miguelr/badeU/Reference/Release11_bestguess_rsid/chr",
+    CHR,
+    "_rsid"
+  )
+  
+  prs(
+    weight = weight,
+    genoPrefix = genoPrefix,
+    out = file.path(work_dir, paste0("PTSD_chr", CHR))
+  )
+}
