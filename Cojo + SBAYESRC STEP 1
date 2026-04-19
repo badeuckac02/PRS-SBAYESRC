@@ -54,15 +54,3 @@ imp_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_imp.m
 # Run imputation
 impute(tidy_file, ld_folder, imp_file)
 
-STEP 3 SBAYESRC 
-
-library(SBayesRC)
-
-# Paths
-imp_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_imp.ma"
-ld_folder <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/SbayesRC/UKB_Ref"
-out_prefix <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/ChronicPainSumToukimo_sbrc"
-annot_file <- "/working/lab_miguelr/badeU/AGDS_CP_GWAS/SbayesRC/annot_baseline2.2.txt"
-
-# Run SBayesRC modeling
-sbayesrc(imp_file, ld_folder, out_prefix, annot = annot_file)
