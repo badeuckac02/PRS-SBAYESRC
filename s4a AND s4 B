@@ -1,0 +1,855 @@
+cat > 08_LCA_FINAL_N4862/FINAL_N4862_SUPPLEMENTARY_TABLE4_PAIN_INTENSITY_MODELS.R <<'RS'
+###############################################################################
+# FINAL SUPPLEMENTARY TABLE S4
+# Ordinal pain-intensity models in FINAL N=4,862 CMP cases
+#
+# Outcomes:
+#   PAINAVG = average pain intensity
+#   PAINNOW = current pain intensity
+#
+# Exposure:
+#   CMP_PGS_Z
+#   IMPORTANT: already standardised in final N=11,557 cohort.
+#   DO NOT re-standardise among cases.
+#
+# Models:
+#   Female: outcome ~ CMP_PGS_Z + AGE + MDD + PC1-PC10
+#   Male:   outcome ~ CMP_PGS_Z + AGE + MDD + PC1-PC10
+#   Interaction:
+#           outcome ~ CMP_PGS_Z * SEX + AGE + MDD + PC1-PC10
+###############################################################################
+
+suppressPackageStartupMessages({
+  library(MASS)
+})
+
+options(stringsAsFactors = FALSE)
+options(scipen = 999)
+
+###############################################################################
+# PATHS
+###############################################################################
+
+infile <- paste0(
+  "08_LCA_FINAL_N4862/",
+  "FINAL_LCA10_CASES_PLUS_CONTROLS_N11557_WITH_STANDARDISED_PGS.tsv"
+)
+
+outdir <- "08_LCA_FINAL_N4862"
+
+###############################################################################
+# READ DATA
+###############################################################################
+
+cat("\n============================================================\n")
+cat("READING FINAL STANDARDISED-PGS DATASET\n")
+cat("============================================================\n")
+
+dat <- read.delim(
+  infile,
+  sep = "\t",
+  header = TRUE,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+cat("Full dataset N =", nrow(dat), "\n")
+
+###############################################################################
+# REQUIRED VARIABLES
+###############################################################################
+
+required <- c(
+  "analysis_group",
+  "SEX",
+  "AGE",
+  "MDD",
+  "CMP_PGS_Z",
+  "PAINAVG",
+  "PAINNOW",
+  paste0("PC", 1:10)
+)
+
+missing_vars <- setdiff(required, names(dat))
+
+if (length(missing_vars) > 0) {
+  stop(
+    paste(
+      "STOP. Missing required variables:",
+      paste(missing_vars, collapse = ", ")
+    )
+  )
+}
+
+###############################################################################
+# FINAL CASE COHORT
+###############################################################################
+
+d <- dat[
+  dat$analysis_group == "LCA10 case",
+  ,
+  drop = FALSE
+]
+
+cat("Final CMP cases =", nrow(d), "\n")
+
+if (nrow(d) != 4862) {
+  stop(
+    paste0(
+      "STOP: Expected N=4862 final CMP cases but found ",
+      nrow(d)
+    )
+  )
+}
+
+###############################################################################
+# BASIC VARIABLE CHECKS
+###############################################################################
+
+cat("\n============================================================\n")
+cat("SEX CHECK\n")
+cat("============================================================\n")
+
+print(table(d$SEX, useNA = "ifany"))
+
+cat("\nExpected coding: 1 = male, 2 = female\n")
+
+cat("\n============================================================\n")
+cat("OUTCOME AVAILABILITY\n")
+cat("============================================================\n")
+
+for (outcome in c("PAINAVG", "PAINNOW")) {
+
+  cat("\n", outcome, "\n", sep = "")
+
+  cat(
+    "Available overall =",
+    sum(!is.na(d[[outcome]])),
+    "\n"
+  )
+
+  cat(
+    "Missing overall =",
+    sum(is.na(d[[outcome]])),
+    "\n"
+  )
+
+  cat("\nAvailable by sex:\n")
+  print(
+    table(
+      SEX = d$SEX[!is.na(d[[outcome]])],
+      useNA = "ifany"
+    )
+  )
+
+  cat("\nMissing by sex:\n")
+  print(
+    table(
+      SEX = d$SEX[is.na(d[[outcome]])],
+      useNA = "ifany"
+    )
+  )
+
+  cat("\nObserved outcome values:\n")
+  print(
+    table(
+      d[[outcome]],
+      useNA = "ifany"
+    )
+  )
+}
+
+###############################################################################
+# CHECK CMP PGS STANDARDISATION
+###############################################################################
+
+cat("\n============================================================\n")
+cat("CMP PGS STANDARDISATION CHECK\n")
+cat("============================================================\n")
+
+cat(
+  "Full N=11,557 mean CMP_PGS_Z =",
+  mean(dat$CMP_PGS_Z, na.rm = TRUE),
+  "\n"
+)
+
+cat(
+  "Full N=11,557 SD CMP_PGS_Z =",
+  sd(dat$CMP_PGS_Z, na.rm = TRUE),
+  "\n"
+)
+
+cat(
+  "Case-only mean CMP_PGS_Z =",
+  mean(d$CMP_PGS_Z, na.rm = TRUE),
+  "\n"
+)
+
+cat(
+  "Case-only SD CMP_PGS_Z =",
+  sd(d$CMP_PGS_Z, na.rm = TRUE),
+  "\n"
+)
+
+###############################################################################
+# FORMULA COMPONENTS
+###############################################################################
+
+pcs <- paste0("PC", 1:10)
+
+covars <- c(
+  "CMP_PGS_Z",
+  "AGE",
+  "MDD",
+  pcs
+)
+
+###############################################################################
+# HELPER: FIT SEX-STRATIFIED ORDINAL MODEL
+###############################################################################
+
+fit_sex_model <- function(data, outcome, sex_code, sex_label) {
+
+  x <- data[data$SEX == sex_code, , drop = FALSE]
+
+  model_vars <- c(outcome, covars)
+
+  cc <- complete.cases(x[, model_vars, drop = FALSE])
+
+  mdat <- x[cc, model_vars, drop = FALSE]
+
+  cat("\n------------------------------------------------------------\n")
+  cat(outcome, "-", sex_label, "\n")
+  cat("------------------------------------------------------------\n")
+
+  cat("Sex-specific cohort N =", nrow(x), "\n")
+  cat(
+    "Outcome available N =",
+    sum(!is.na(x[[outcome]])),
+    "\n"
+  )
+  cat(
+    "Complete-case model N =",
+    nrow(mdat),
+    "\n"
+  )
+
+  if (nrow(mdat) == 0) {
+    stop("No complete cases available.")
+  }
+
+  # Ordered response required for proportional-odds model.
+  mdat[[outcome]] <- ordered(
+    mdat[[outcome]],
+    levels = sort(unique(mdat[[outcome]]))
+  )
+
+  form <- as.formula(
+    paste(
+      outcome,
+      "~",
+      paste(covars, collapse = " + ")
+    )
+  )
+
+  fit <- polr(
+    form,
+    data = mdat,
+    Hess = TRUE,
+    method = "logistic"
+  )
+
+  sm <- coef(summary(fit))
+
+  coef_names <- rownames(sm)
+
+  z <- sm[, "Value"] / sm[, "Std. Error"]
+
+  p <- 2 * pnorm(abs(z), lower.tail = FALSE)
+
+  tab <- data.frame(
+    outcome = outcome,
+    sex = sex_label,
+    sex_code = sex_code,
+    N_model = nrow(mdat),
+    term = coef_names,
+    beta = sm[, "Value"],
+    SE = sm[, "Std. Error"],
+    z = z,
+    raw_p = p,
+    OR = exp(sm[, "Value"]),
+    CI_low = exp(
+      sm[, "Value"] -
+        1.96 * sm[, "Std. Error"]
+    ),
+    CI_high = exp(
+      sm[, "Value"] +
+        1.96 * sm[, "Std. Error"]
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  cat("\nFULL MODEL SUMMARY\n")
+  print(summary(fit))
+
+  cat("\nCOEFFICIENT TABLE\n")
+  print(tab, row.names = FALSE)
+
+  list(
+    fit = fit,
+    table = tab,
+    N = nrow(mdat)
+  )
+}
+
+###############################################################################
+# HELPER: FIT COMBINED PGS x SEX INTERACTION
+###############################################################################
+
+fit_interaction_model <- function(data, outcome) {
+
+  model_vars <- c(
+    outcome,
+    "CMP_PGS_Z",
+    "SEX",
+    "AGE",
+    "MDD",
+    pcs
+  )
+
+  cc <- complete.cases(
+    data[, model_vars, drop = FALSE]
+  )
+
+  mdat <- data[
+    cc,
+    model_vars,
+    drop = FALSE
+  ]
+
+  mdat[[outcome]] <- ordered(
+    mdat[[outcome]],
+    levels = sort(unique(mdat[[outcome]]))
+  )
+
+  # Male = reference; Female = level 2.
+  mdat$SEX_factor <- factor(
+    mdat$SEX,
+    levels = c(1, 2),
+    labels = c("Male", "Female")
+  )
+
+  form <- as.formula(
+    paste0(
+      outcome,
+      " ~ CMP_PGS_Z * SEX_factor + AGE + MDD + ",
+      paste(pcs, collapse = " + ")
+    )
+  )
+
+  cat("\n============================================================\n")
+  cat(outcome, "- CMP PGS x SEX INTERACTION\n")
+  cat("============================================================\n")
+  cat("Complete-case model N =", nrow(mdat), "\n")
+
+  fit <- polr(
+    form,
+    data = mdat,
+    Hess = TRUE,
+    method = "logistic"
+  )
+
+  sm <- coef(summary(fit))
+
+  z <- sm[, "Value"] / sm[, "Std. Error"]
+
+  p <- 2 * pnorm(abs(z), lower.tail = FALSE)
+
+  tab <- data.frame(
+    outcome = outcome,
+    N_model = nrow(mdat),
+    term = rownames(sm),
+    beta = sm[, "Value"],
+    SE = sm[, "Std. Error"],
+    z = z,
+    raw_p = p,
+    OR = exp(sm[, "Value"]),
+    CI_low = exp(
+      sm[, "Value"] -
+        1.96 * sm[, "Std. Error"]
+    ),
+    CI_high = exp(
+      sm[, "Value"] +
+        1.96 * sm[, "Std. Error"]
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  cat("\nFULL MODEL SUMMARY\n")
+  print(summary(fit))
+
+  cat("\nCOEFFICIENT TABLE\n")
+  print(tab, row.names = FALSE)
+
+  int_row <- grep(
+    "CMP_PGS_Z:SEX_factor",
+    tab$term
+  )
+
+  if (length(int_row) != 1) {
+    stop(
+      paste(
+        "Could not uniquely identify interaction term.",
+        "Terms:",
+        paste(tab$term, collapse = ", ")
+      )
+    )
+  }
+
+  interaction <- tab[int_row, , drop = FALSE]
+
+  cat("\nINTERACTION RESULT\n")
+  print(interaction, row.names = FALSE)
+
+  list(
+    fit = fit,
+    table = tab,
+    interaction = interaction,
+    N = nrow(mdat)
+  )
+}
+
+###############################################################################
+# RUN ALL MODELS
+###############################################################################
+
+results <- list()
+
+for (outcome in c("PAINAVG", "PAINNOW")) {
+
+  cat("\n\n############################################################\n")
+  cat("OUTCOME:", outcome, "\n")
+  cat("############################################################\n")
+
+  female <- fit_sex_model(
+    d,
+    outcome,
+    sex_code = 2,
+    sex_label = "Female"
+  )
+
+  male <- fit_sex_model(
+    d,
+    outcome,
+    sex_code = 1,
+    sex_label = "Male"
+  )
+
+  interaction <- fit_interaction_model(
+    d,
+    outcome
+  )
+
+  results[[outcome]] <- list(
+    Female = female,
+    Male = male,
+    Interaction = interaction
+  )
+}
+
+###############################################################################
+# EXTRACT TABLE S4 VALUES
+###############################################################################
+
+extract_term <- function(x, term_name) {
+
+  y <- x$table[
+    x$table$term == term_name,
+    ,
+    drop = FALSE
+  ]
+
+  if (nrow(y) != 1) {
+    stop(
+      paste(
+        "Expected one",
+        term_name,
+        "row; found",
+        nrow(y)
+      )
+    )
+  }
+
+  y
+}
+
+make_S4 <- function(outcome) {
+
+  f_pgs <- extract_term(
+    results[[outcome]]$Female,
+    "CMP_PGS_Z"
+  )
+
+  f_age <- extract_term(
+    results[[outcome]]$Female,
+    "AGE"
+  )
+
+  m_pgs <- extract_term(
+    results[[outcome]]$Male,
+    "CMP_PGS_Z"
+  )
+
+  m_age <- extract_term(
+    results[[outcome]]$Male,
+    "AGE"
+  )
+
+  int <- results[[outcome]]$Interaction$interaction
+
+  out <- data.frame(
+    Outcome = outcome,
+
+    Female_N =
+      results[[outcome]]$Female$N,
+
+    Female_PGS_OR =
+      f_pgs$OR,
+
+    Female_PGS_CI_low =
+      f_pgs$CI_low,
+
+    Female_PGS_CI_high =
+      f_pgs$CI_high,
+
+    Female_PGS_raw_p =
+      f_pgs$raw_p,
+
+    Female_AGE_OR =
+      f_age$OR,
+
+    Female_AGE_CI_low =
+      f_age$CI_low,
+
+    Female_AGE_CI_high =
+      f_age$CI_high,
+
+    Female_AGE_raw_p =
+      f_age$raw_p,
+
+    Male_N =
+      results[[outcome]]$Male$N,
+
+    Male_PGS_OR =
+      m_pgs$OR,
+
+    Male_PGS_CI_low =
+      m_pgs$CI_low,
+
+    Male_PGS_CI_high =
+      m_pgs$CI_high,
+
+    Male_PGS_raw_p =
+      m_pgs$raw_p,
+
+    Male_AGE_OR =
+      m_age$OR,
+
+    Male_AGE_CI_low =
+      m_age$CI_low,
+
+    Male_AGE_CI_high =
+      m_age$CI_high,
+
+    Male_AGE_raw_p =
+      m_age$raw_p,
+
+    Interaction_N =
+      results[[outcome]]$Interaction$N,
+
+    PGSxSEX_OR =
+      int$OR,
+
+    PGSxSEX_CI_low =
+      int$CI_low,
+
+    PGSxSEX_CI_high =
+      int$CI_high,
+
+    PGSxSEX_raw_p =
+      int$raw_p,
+
+    stringsAsFactors = FALSE
+  )
+
+  out
+}
+
+S4A <- make_S4("PAINAVG")
+S4B <- make_S4("PAINNOW")
+
+###############################################################################
+# OPTIONAL FDR FOR THE TWO SEX-STRATIFIED PGS TESTS WITHIN EACH OUTCOME
+#
+# This is written separately and must only be reported if this multiplicity
+# correction is part of the final analysis/reporting plan.
+###############################################################################
+
+fdr_table <- data.frame(
+  Outcome = c(
+    "PAINAVG",
+    "PAINAVG",
+    "PAINNOW",
+    "PAINNOW"
+  ),
+  Sex = c(
+    "Female",
+    "Male",
+    "Female",
+    "Male"
+  ),
+  Raw_P = c(
+    S4A$Female_PGS_raw_p,
+    S4A$Male_PGS_raw_p,
+    S4B$Female_PGS_raw_p,
+    S4B$Male_PGS_raw_p
+  ),
+  stringsAsFactors = FALSE
+)
+
+# BH separately within each outcome across female/male PGS tests.
+fdr_table$FDR_P <- NA_real_
+
+for (o in unique(fdr_table$Outcome)) {
+
+  ii <- fdr_table$Outcome == o
+
+  fdr_table$FDR_P[ii] <-
+    p.adjust(
+      fdr_table$Raw_P[ii],
+      method = "BH"
+    )
+}
+
+###############################################################################
+# SAVE MACHINE-READABLE OUTPUT
+###############################################################################
+
+write.table(
+  S4A,
+  file = file.path(
+    outdir,
+    "Supplementary_Table_4A_AVERAGE_PAIN_FINAL_N4862.tsv"
+  ),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+write.table(
+  S4B,
+  file = file.path(
+    outdir,
+    "Supplementary_Table_4B_CURRENT_PAIN_FINAL_N4862.tsv"
+  ),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+write.table(
+  fdr_table,
+  file = file.path(
+    outdir,
+    "Supplementary_Table_4_OPTIONAL_PGS_FDR_FINAL_N4862.tsv"
+  ),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+###############################################################################
+# SAVE COMPLETE MODEL OUTPUT
+###############################################################################
+
+outfile <- file.path(
+  outdir,
+  "Supplementary_Table_4_COMPLETE_MODEL_OUTPUT_FINAL_N4862.txt"
+)
+
+sink(outfile)
+
+cat("SUPPLEMENTARY TABLE S4 — FINAL VERIFIED MODEL OUTPUT\n")
+cat("====================================================\n\n")
+
+cat("Input dataset:\n")
+cat(infile, "\n\n")
+
+cat("Full standardisation cohort N =", nrow(dat), "\n")
+cat("Final CMP case cohort N =", nrow(d), "\n\n")
+
+cat("CMP_PGS_Z mean in full cohort =",
+    mean(dat$CMP_PGS_Z, na.rm = TRUE), "\n")
+cat("CMP_PGS_Z SD in full cohort =",
+    sd(dat$CMP_PGS_Z, na.rm = TRUE), "\n\n")
+
+cat("PAINAVG available =",
+    sum(!is.na(d$PAINAVG)), "\n")
+cat("PAINAVG missing =",
+    sum(is.na(d$PAINAVG)), "\n\n")
+
+cat("PAINNOW available =",
+    sum(!is.na(d$PAINNOW)), "\n")
+cat("PAINNOW missing =",
+    sum(is.na(d$PAINNOW)), "\n\n")
+
+cat("PAINNOW missing by sex:\n")
+print(
+  table(
+    d$SEX[is.na(d$PAINNOW)],
+    useNA = "ifany"
+  )
+)
+
+cat("\n\n====================================================\n")
+cat("TABLE S4A — AVERAGE PAIN\n")
+cat("====================================================\n")
+print(S4A, row.names = FALSE)
+
+cat("\nFemale full model:\n")
+print(
+  summary(
+    results$PAINAVG$Female$fit
+  )
+)
+
+cat("\nFemale coefficient output:\n")
+print(
+  results$PAINAVG$Female$table,
+  row.names = FALSE
+)
+
+cat("\nMale full model:\n")
+print(
+  summary(
+    results$PAINAVG$Male$fit
+  )
+)
+
+cat("\nMale coefficient output:\n")
+print(
+  results$PAINAVG$Male$table,
+  row.names = FALSE
+)
+
+cat("\nPGS x SEX full model:\n")
+print(
+  summary(
+    results$PAINAVG$Interaction$fit
+  )
+)
+
+cat("\nPGS x SEX coefficient output:\n")
+print(
+  results$PAINAVG$Interaction$table,
+  row.names = FALSE
+)
+
+cat("\n\n====================================================\n")
+cat("TABLE S4B — CURRENT PAIN\n")
+cat("====================================================\n")
+print(S4B, row.names = FALSE)
+
+cat("\nFemale full model:\n")
+print(
+  summary(
+    results$PAINNOW$Female$fit
+  )
+)
+
+cat("\nFemale coefficient output:\n")
+print(
+  results$PAINNOW$Female$table,
+  row.names = FALSE
+)
+
+cat("\nMale full model:\n")
+print(
+  summary(
+    results$PAINNOW$Male$fit
+  )
+)
+
+cat("\nMale coefficient output:\n")
+print(
+  results$PAINNOW$Male$table,
+  row.names = FALSE
+)
+
+cat("\nPGS x SEX full model:\n")
+print(
+  summary(
+    results$PAINNOW$Interaction$fit
+  )
+)
+
+cat("\nPGS x SEX coefficient output:\n")
+print(
+  results$PAINNOW$Interaction$table,
+  row.names = FALSE
+)
+
+cat("\n\nOPTIONAL FDR TABLE\n")
+cat("==================\n")
+print(fdr_table, row.names = FALSE)
+
+cat("\n\nSESSION INFO\n")
+cat("============\n")
+print(sessionInfo())
+
+sink()
+
+###############################################################################
+# SCREEN OUTPUT
+###############################################################################
+
+cat("\n\n============================================================\n")
+cat("FINAL TABLE S4A — AVERAGE PAIN\n")
+cat("============================================================\n")
+print(S4A, row.names = FALSE)
+
+cat("\n\n============================================================\n")
+cat("FINAL TABLE S4B — CURRENT PAIN\n")
+cat("============================================================\n")
+print(S4B, row.names = FALSE)
+
+cat("\n\n============================================================\n")
+cat("OPTIONAL PGS FDR OUTPUT\n")
+cat("============================================================\n")
+print(fdr_table, row.names = FALSE)
+
+cat("\n\nFiles written:\n")
+
+cat(
+  file.path(
+    outdir,
+    "Supplementary_Table_4A_AVERAGE_PAIN_FINAL_N4862.tsv"
+  ),
+  "\n"
+)
+
+cat(
+  file.path(
+    outdir,
+    "Supplementary_Table_4B_CURRENT_PAIN_FINAL_N4862.tsv"
+  ),
+  "\n"
+)
+
+cat(
+  outfile,
+  "\n"
+)
+
+cat("\nDONE.\n")
+RS
